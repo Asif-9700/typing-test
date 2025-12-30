@@ -4,7 +4,6 @@ import Stats from "./components/Stats";
 import AccuracyChart from "./components/AccuracyChart";
 import ThemeToggle from "./components/ThemeToggle";
 import Auth from "./components/Auth";
-/* 🔹 Local fallback paragraphs (used if API fails) */
 const fallbackParagraphs = [
   "The foundation of the Computer Operator exam lies in understanding the internal architecture of a computer. A computer system is primarily divided into the Central Processing Unit (CPU), Memory, and Input/Output devices. The CPU, often called the brain of the computer, consists of the Arithmetic Logic Unit (ALU) and the Control Unit (CU). Understanding the hierarchy of memory is crucial: from high-speed cache and RAM (volatile memory) to secondary storage like Hard Disk Drives (HDD) and Solid State Drives (SSD). Operators must be proficient in identifying hardware components and understanding their functions, such as the motherboard's role in connecting various peripherals. Additionally, knowledge of number systems—specifically Binary, Octal, and Hexadecimal—is vital, as computers process data in these formats. Mastery of these basics ensures that an operator can troubleshoot hardware issues and optimize system performance. Familiarity with Plug and Play devices and the BIOS (Basic Input/Output System) setup is also expected, as these are the first layers of interaction when a system boots up.",
   "Operating Systems (OS) act as an interface between the user and the computer hardware. For the UP Police exam, candidates must understand the functions of popular operating systems like Windows, Unix, and Linux. Key concepts include process management, memory management, and file system structures (like NTFS or FAT32). A computer operator must know how to navigate the Command Line Interface (CLI) in Linux, as many government servers run on open-source platforms. Beyond the OS, software is categorized into System Software and Application Software. System software includes drivers and utilities that keep the hardware running, while application software includes tools like MS Office (Word, Excel, PowerPoint) which are essential for daily administrative tasks. Understanding the difference between multitasking, multithreading, and real-time operating systems is a frequent area of questioning. Furthermore, the ability to manage system updates, install patches, and handle software licenses is a practical skill required for maintaining the integrity of departmental digital records.",
@@ -17,22 +16,32 @@ const fallbackParagraphs = [
 
   "The landscape of information technology is constantly evolving, and the UP Police exam often includes questions on modern trends. This includes Cloud Computing, which allows for the storage and access of data over the internet rather than on local hard drives. Concepts like IaaS (Infrastructure as a Service) and SaaS (Software as a Service) are becoming common in government infrastructure. Artificial Intelligence (AI) and Machine Learning (ML) are also being integrated into policing for pattern recognition and predictive analysis. The Internet of Things (IoT) connects physical devices to the internet, which can be seen in smart surveillance systems. Furthermore, Big Data analytics helps in processing large volumes of unstructured data to find actionable insights. Being aware of these technologies is not just about passing an exam; it is about being prepared for the future of digital governance. Understanding how these tools can improve efficiency and transparency in public service is a key trait of a modern computer operator."
 ];
+
+
+
+
+const AVG_WPM = 35;
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(
     !!localStorage.getItem("loggedInUser")
   );
 
+  /* Typing states */
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState("");
-  const [time, setTime] = useState(60);
+  const [time, setTime] = useState(0);           // remaining time (informational)
+  const [elapsedTime, setElapsedTime] = useState(0); // real elapsed time
   const [started, setStarted] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
 
+  /* Stats */
   const [wpm, setWpm] = useState(0);
   const [accuracy, setAccuracy] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
 
+  /* Best scores */
   const [bestWpm, setBestWpm] = useState(
     Number(localStorage.getItem("bestWpm")) || 0
   );
@@ -43,7 +52,9 @@ function App() {
   const [accuracyData, setAccuracyData] = useState([]);
   const [labels, setLabels] = useState([]);
 
-  /* Fetch paragraph */
+  /* ===============================
+     FETCH PARAGRAPH + DYNAMIC TIME
+  =============================== */
   const fetchParagraph = async () => {
     try {
       setLoading(true);
@@ -51,11 +62,22 @@ function App() {
         "https://api.quotable.io/random?minLength=150&maxLength=250"
       );
       if (!res.ok) throw new Error();
+
       const data = await res.json();
       setText(data.content);
+
+      const chars = data.content.length;
+      const calculatedTime = Math.ceil((chars / 5 / AVG_WPM) * 60);
+      setTime(calculatedTime);
     } catch {
       const idx = Math.floor(Math.random() * fallbackParagraphs.length);
-      setText(fallbackParagraphs[idx]);
+      const para = fallbackParagraphs[idx];
+
+      setText(para);
+
+      const chars = para.length;
+      const calculatedTime = Math.ceil((chars / 5 / AVG_WPM) * 60);
+      setTime(calculatedTime);
     } finally {
       setLoading(false);
     }
@@ -65,25 +87,32 @@ function App() {
     fetchParagraph();
   }, []);
 
-  /* Timer */
+  /* ===============================
+     TIMER (REAL ELAPSED TIME)
+  =============================== */
   useEffect(() => {
-    let timer;
-    if (started && time > 0 && !isFinished) {
-      timer = setInterval(() => setTime((t) => t - 1), 1000);
-    }
-    return () => clearInterval(timer);
-  }, [started, time, isFinished]);
+    if (!started || isFinished) return;
 
-  /* Stats */
+    const interval = setInterval(() => {
+      setElapsedTime((t) => t + 1);
+      setTime((t) => (t > 0 ? t - 1 : 0)); // timer stops at 0 but typing continues
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [started, isFinished]);
+
+  /* ===============================
+     STATS CALCULATION (FIXED WPM)
+  =============================== */
   useEffect(() => {
-    if (!input || !text) return;
+    if (!input || !text || elapsedTime === 0) return;
 
     let correct = 0;
     for (let i = 0; i < input.length; i++) {
       if (input[i] === text[i]) correct++;
     }
 
-    const minutes = (60 - time) / 60;
+    const minutes = elapsedTime / 60;
     const wpmCalc =
       minutes > 0 ? Math.round((correct / 5) / minutes) : 0;
     const accuracyCalc = Math.round((correct / input.length) * 100);
@@ -102,12 +131,22 @@ function App() {
     }
 
     setAccuracyData((prev) => [...prev, accuracyCalc]);
-    setLabels((prev) => [...prev, 60 - time]);
-  }, [input]);
+    setLabels((prev) => [...prev, elapsedTime]);
+  }, [input, elapsedTime]);
 
+  /* ===============================
+     HANDLERS
+  =============================== */
   const handleChange = (e) => {
     if (!started) setStarted(true);
-    setInput(e.target.value);
+
+    const value = e.target.value;
+    setInput(value);
+
+    /* Auto finish when paragraph ends */
+    if (value.length >= text.length) {
+      finishTest();
+    }
   };
 
   const finishTest = () => {
@@ -118,7 +157,7 @@ function App() {
   const resetTest = () => {
     fetchParagraph();
     setInput("");
-    setTime(60);
+    setElapsedTime(0);
     setStarted(false);
     setIsFinished(false);
     setWpm(0);
@@ -134,12 +173,13 @@ function App() {
     setBestAccuracy(0);
   };
 
+  /* ===============================
+     UI
+  =============================== */
   return (
     <div className={`container ${darkMode ? "dark" : ""}`}>
       {!isAuthenticated ? (
-        <div className="auth-page">
-          <Auth onAuthSuccess={() => setIsAuthenticated(true)} />
-        </div>
+        <Auth onAuthSuccess={() => setIsAuthenticated(true)} />
       ) : (
         <>
           <div className="card">
@@ -169,7 +209,7 @@ function App() {
             <textarea
               value={input}
               onChange={handleChange}
-              disabled={time === 0 || loading || isFinished}
+              disabled={loading || isFinished}
               placeholder="Start typing here..."
             />
 
@@ -196,7 +236,6 @@ function App() {
                 Reset Best Score
               </button>
             </div>
-
           </div>
 
           {isFinished && (
@@ -205,7 +244,7 @@ function App() {
                 <h2>Test Results</h2>
 
                 <Stats
-                  time={60 - time}
+                  time={elapsedTime}
                   wpm={wpm}
                   accuracy={accuracy}
                   bestWpm={bestWpm}
